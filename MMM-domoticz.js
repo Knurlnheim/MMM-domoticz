@@ -36,24 +36,17 @@ Module.register("MMM-domoticz",{
 	getStyles: function() {
 	    return ['font-awesome.css'];
 	},
-	// Define required scripts.
-	getScripts: function() {
-		return ["moment.js"];
-	},
+
 
 
 
 	// Define start sequence.
 	start: function() {
 		Log.info("Starting module: " + this.name);
-
-		// Set locale.
-		moment.locale(config.language);
-
 		this.loaded = false;
-		this.status1 = false;
 		this.title = "Loading...";
 		this.scheduleUpdate(this.config.updateInterval);
+		this.domosensors = [];
 		this.sensors = [];
 		for (var c in this.config.sensors) {
 			var sensor = this.config.sensors[c];
@@ -62,6 +55,8 @@ Module.register("MMM-domoticz",{
 			this.sensors.push(newSensor);
 		}
  // console.log(this.sensors);
+		  this.getData();
+
 	},
 
 
@@ -81,6 +76,22 @@ Module.register("MMM-domoticz",{
 		for (var c in this.sensors) {
 
 			var sensor = this.sensors[c];
+			//Log.info("sensor :"+ JSON.stringify(sensor));
+
+			var dindex = this.domosensors.findIndex(MyIdx => MyIdx.idx === sensor.idx);
+			sensor.sname = this.domosensors[dindex].Name;
+			sensor.status = this.domosensors[dindex].Data;
+			sensor.type = this.domosensors[dindex].Type;
+			if (sensor.type == "Wind") {
+				sensor.statexp = sensor.status.split(";");
+				var wind = sensor.statexp[2]*.36;
+				var gust = sensor.statexp[3]*.36;
+				sensor.status = sensor.statexp[1] + ", " + wind.toFixed() + " km/h (" + gust.toFixed() + " km/h)"
+			}
+			//Log.info("sensor :"+ JSON.stringify(sensor));
+
+
+
 			if((sensor.status=="On" && sensor.hiddenon)||(sensor.status=="Off" && sensor.hiddenoff)) continue;
 			nbShown += 1;
 			var sensorWrapper = document.createElement("tr");
@@ -88,7 +99,7 @@ Module.register("MMM-domoticz",{
 
 			var symbolTD = document.createElement('td');
 			symbolTD.className = "symbol";
-			var symbol = document.createElement('i');
+			var symbol = document.createElement("span");
 			var symbolClass = sensor.symboloff
 			if(sensor.status=="On") symbolClass = sensor.symbolon
 			symbol.className = symbolClass;
@@ -104,7 +115,7 @@ Module.register("MMM-domoticz",{
 
 			var statusTD = document.createElement('td');
 			statusTD.className = "time light";
-			statusTD.innerHTML = sensor.status;
+			statusTD.innerHTML = sensor.status.replace(".", ",").replace(" C", "°C");
 			sensorWrapper.appendChild(statusTD);
 
 			tableWrap.appendChild(sensorWrapper);
@@ -126,55 +137,7 @@ Module.register("MMM-domoticz",{
 		return wrapper;
 	},
 
-
-	updateDomo: function() {
-		var i = 0;
-		for (var c in this.sensors) {
-			// console.log("this is c: " + c);
-			var sensor = this.sensors[c];
-			var url = this.config.apiBase + ":" + this.config.apiPort + "/json.htm?type=devices&rid="  + sensor.idx;
-			var self = this;
-
-			var domoRequest = new XMLHttpRequest();
-			domoRequest.open("GET", url, true);
-			domoRequest.onreadystatechange = function() {
-				if (this.readyState === 4) {
-					if (this.status === 200) {
-						self.processJson(JSON.parse(this.response));
-						// console.log("Loaded data");
-					} else {
-						Log.error(self.name + ": Could not load data.");
-						// console.log("Did not load data");
-					}
-				}
-			};
-			domoRequest.send();
-			i++;
-		}
-	},
-
-	processJson: function(data) {
-		// console.log("****Parsing data: " + c + " " + data.result[0].Name);
-		if (!data) {
-			// Did not receive usable new data.
-			// Maybe this needs a better check?
-			return;
-		}
-		for (var c in this.sensors) {
-			var sensor = this.sensors[c];
-			if(sensor.idx == data.result[0].idx){
-				this.sensors[c].sname = data.result[0].Name;
-				this.sensors[c].status = data.result[0].Data;
-				this.sensors[c].type = data.result[0].Type;
-			}
-		}
-
-		this.loaded = true;
-		this.updateDom(this.config.animationSpeed);
-	},
-
 	scheduleUpdate: function(delay) {
-		// console.log("Updating..");
 		var nextLoad = this.config.updateInterval;
 		if (typeof delay !== "undefined" && delay >= 0) {
 			nextLoad = delay;
@@ -182,7 +145,27 @@ Module.register("MMM-domoticz",{
 
 		var self = this;
 		setInterval(function() {
-			self.updateDomo();
+			self.getData();
 		}, nextLoad);
+	},
+
+	getData: function () {
+		var req_url = this.config.apiBase + ":" + this.config.apiPort + "/json.htm?type=devices&used=true&order=Name";
+		this.sendSocketNotification('DOMOTICZ_READ', req_url);
+		this.loaded = false;
+	},
+
+	socketNotificationReceived: function(notification, payload) {
+		if (notification === "DOMOTICZ_DATA") {
+		  //Log.info("received :"+ JSON.stringify(payload));
+			//var domoresults = payload;
+			this.domosensors = payload.result;
+			//Log.info("result :"+ JSON.stringify(payload.result[0]));
+			this.loaded = true;
+			var fade = 500;
+			this.updateDom(fade);
+		}
+
 	}
+
 });
